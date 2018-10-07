@@ -51,7 +51,7 @@ func main() {
 	router.HandleFunc("/protected", TokenVerifyMiddleWare(ProtectedEndpoint)).Methods("GET")
 
 	log.Println("Listen on port 8000...")
-	log.Fatal(http.ListenAndServe(":8000", router), "Server started on port 80000")
+	log.Fatal(http.ListenAndServe(":8000", router), "Server started on port 8000")
 }
 
 func GenerateToken(user User) (string, error) {
