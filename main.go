@@ -48,7 +48,7 @@ func main() {
 
 	router.HandleFunc("/signup", signup).Methods("POST")
 	router.HandleFunc("/login", login).Methods("POST")
-	router.HandleFunc("/protected", ValidateMiddleware(ProtectedEndpoint)).Methods("GET")
+	router.HandleFunc("/protected", TokenVerifyMiddleWare(ProtectedEndpoint)).Methods("GET")
 
 	log.Println("Listen on port 8000...")
 	log.Fatal(http.ListenAndServe(":8000", router), "Server started on port 80000")
@@ -103,7 +103,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	respond.With(w, r, http.StatusOK, user)
 }
 
-func ValidateMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func TokenVerifyMiddleWare(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorizationHeader := r.Header.Get("Authorization")
 
