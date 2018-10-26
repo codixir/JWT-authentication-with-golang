@@ -3,36 +3,50 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/lib/pq"
-	respond "gopkg.in/matryer/respond.v1"
 
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	Id       int    `json:"id"`
+	ID       int    `json:"id"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	Token    string `json:"token"`
+}
+
+type JWT struct {
+	Token string `json:"token"`
+}
+
+type Error struct {
+	Message string `json:"message"`
+}
+
+func respondWithError(w http.ResponseWriter, status int, message string) {
+	var error Error
+	error.Message = message
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(error)
 }
 
 var db *sql.DB
 
 func main() {
-	pgUrl, err := pq.ParseURL("*************")
+	//Change the URL
+	pgURL, err := pq.ParseURL("xxxxxxxx")
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	db, err = sql.Open("postgres", pgUrl)
+	db, err = sql.Open("postgres", pgURL)
 
 	if err != nil {
 		log.Fatal(err)
@@ -51,7 +65,7 @@ func main() {
 	router.HandleFunc("/protected", TokenVerifyMiddleWare(ProtectedEndpoint)).Methods("GET")
 
 	log.Println("Listen on port 8000...")
-	log.Fatal(http.ListenAndServe(":8000", router), "Server started on port 8000")
+	log.Fatal(http.ListenAndServe(":8000", router))
 }
 
 func GenerateToken(user User) (string, error) {
@@ -61,11 +75,13 @@ func GenerateToken(user User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"email": user.Email,
 		"iss":   "course",
-		// "exp": "123"
-		// "nbf"
 	})
 
+	fmt.Println(token)
+
 	tokenString, err := token.SignedString([]byte(secret))
+
+	fmt.Println(tokenString)
 
 	if err != nil {
 		log.Fatal(err)
@@ -78,6 +94,16 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	var user User
 	json.NewDecoder(r.Body).Decode(&user)
 
+	if user.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Email is Missing.")
+		return
+	}
+
+	if user.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Password is Missing.")
+		return
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10)
 
 	if err != nil {
@@ -85,14 +111,12 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user.Password = string(hash)
-	token, err := GenerateToken(user)
-	user.Token = token
 
-	err = db.QueryRow("insert into users (email, password, token) values($1, $2, $3) RETURNING id;",
-		user.Email, user.Password, user.Token).Scan(&user.Id)
+	err = db.QueryRow("insert into users (email, password) values($1, $2) RETURNING id;",
+		user.Email, user.Password).Scan(&user.ID)
 
 	if err != nil {
-		respond.With(w, r, http.StatusInternalServerError, err)
+		respondWithError(w, http.StatusInternalServerError, "Server error.")
 		return
 	}
 
@@ -100,12 +124,17 @@ func signup(w http.ResponseWriter, r *http.Request) {
 
 	user.Password = ""
 
-	respond.With(w, r, http.StatusOK, user)
+	json.NewEncoder(w).Encode(user)
 }
 
 func TokenVerifyMiddleWare(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorizationHeader := r.Header.Get("Authorization")
+		bearerToken := r.Header.Get("Authorization")
+		var authorizationHeader string
+
+		if bearerToken != "" {
+			authorizationHeader = strings.Split(bearerToken, " ")[1]
+		}
 
 		if authorizationHeader != "" {
 			if len(authorizationHeader) > 2 {
@@ -116,24 +145,25 @@ func TokenVerifyMiddleWare(next http.HandlerFunc) http.HandlerFunc {
 					return []byte("secret"), nil
 				})
 				if error != nil {
-					respond.With(w, r, http.StatusUnauthorized, error)
+					respondWithError(w, http.StatusUnauthorized, error.Error())
 					return
 				}
 				if token.Valid {
 					next.ServeHTTP(w, r)
 				} else {
-					respond.With(w, r, http.StatusUnauthorized, error)
+					respondWithError(w, http.StatusUnauthorized, error.Error())
 					return
 				}
 			}
 		} else {
-			respond.With(w, r, http.StatusBadRequest, errors.New("req: Authrization header is missing"))
+			w.WriteHeader(http.StatusUnauthorized)
+			respondWithError(w, http.StatusUnauthorized, "No Authorization header provided.")
 		}
 	})
 }
 
 func ProtectedEndpoint(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("test")
+	json.NewEncoder(w).Encode("Yes")
 }
 
 func ComparePasswords(hashedPssword string, password []byte) bool {
@@ -149,16 +179,22 @@ func ComparePasswords(hashedPssword string, password []byte) bool {
 
 func login(w http.ResponseWriter, r *http.Request) {
 	var user User
+	var jwt JWT
+
 	json.NewDecoder(r.Body).Decode(&user)
 
 	password := user.Password
 
-	rows := db.QueryRow("select * from users where id=$1", user.Id)
-	err := rows.Scan(&user.Id, &user.Email, &user.Password, &user.Token)
+	rows := db.QueryRow("select * from users where email=$1", user.Email)
+	err := rows.Scan(&user.ID, &user.Email, &user.Password)
 
 	hashedPassword := user.Password
 
-	fmt.Println("hashedPassword ", hashedPassword)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	token, err := GenerateToken(user)
 
 	if err != nil {
 		log.Fatal(err)
@@ -166,16 +202,18 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	isValidPassword := ComparePasswords(hashedPassword, []byte(password))
 
-	fmt.Println("isValidPassword ", isValidPassword)
-
 	if isValidPassword {
-
 		w.WriteHeader(200)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Authorization", user.Token)
+		w.Header().Set("Authorization", token)
 
-		json.NewEncoder(w).Encode(user.Token)
+		user.Password = ""
+
+		jwt.Token = token
+
+		json.NewEncoder(w).Encode(jwt)
 	} else {
-		respond.With(w, r, http.StatusUnauthorized, err)
+		w.WriteHeader(http.StatusUnauthorized)
+		respondWithError(w, http.StatusUnauthorized, "Invalid Password.")
 	}
 }
