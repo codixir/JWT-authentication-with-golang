@@ -29,6 +29,11 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+func responseJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
 func respondWithError(w http.ResponseWriter, status int, message string) {
 	var error Error
 	error.Message = message
@@ -39,8 +44,7 @@ func respondWithError(w http.ResponseWriter, status int, message string) {
 var db *sql.DB
 
 func main() {
-	//Change the URL
-	pgURL, err := pq.ParseURL("xxxxxxxx")
+	pgURL, err := pq.ParseURL("postgres://ygodvjeq:xQ6G-I9hggzFOuN6-uf67Rx9-XmmvjL2@elmer.db.elephantsql.com:5432/ygodvjeq")
 
 	if err != nil {
 		log.Fatal(err)
@@ -77,11 +81,7 @@ func GenerateToken(user User) (string, error) {
 		"iss":   "course",
 	})
 
-	fmt.Println(token)
-
 	tokenString, err := token.SignedString([]byte(secret))
-
-	fmt.Println(tokenString)
 
 	if err != nil {
 		log.Fatal(err)
@@ -120,11 +120,9 @@ func signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
 	user.Password = ""
 
-	json.NewEncoder(w).Encode(user)
+	responseJSON(w, user)
 }
 
 func TokenVerifyMiddleWare(next http.HandlerFunc) http.HandlerFunc {
@@ -156,14 +154,13 @@ func TokenVerifyMiddleWare(next http.HandlerFunc) http.HandlerFunc {
 				}
 			}
 		} else {
-			w.WriteHeader(http.StatusUnauthorized)
 			respondWithError(w, http.StatusUnauthorized, "No Authorization header provided.")
 		}
 	})
 }
 
 func ProtectedEndpoint(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode("Yes")
+	responseJSON(w, "Yes")
 }
 
 func ComparePasswords(hashedPssword string, password []byte) bool {
@@ -207,13 +204,9 @@ func login(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Authorization", token)
 
-		user.Password = ""
-
 		jwt.Token = token
-
-		json.NewEncoder(w).Encode(jwt)
+		responseJSON(w, jwt)
 	} else {
-		w.WriteHeader(http.StatusUnauthorized)
 		respondWithError(w, http.StatusUnauthorized, "Invalid Password.")
 	}
 }
